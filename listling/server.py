@@ -38,6 +38,7 @@ def make_server(*, port=8080, url=None, debug=False, redis_url='', smtp_url='',
         (r'/api/users/([^/]+)/lists/([^/]+)$', _UserListEndpoint),
         (r'/api/lists$', _ListsEndpoint),
         (r'/api/lists/create-example$', _ListsCreateExampleEndpoint),
+        (r'/api/lists/shorts$', _ListsShortsEndpoint),
         (r'/api/lists/([^/]+)$', _ListEndpoint),
         (r'/api/lists/([^/]+)/items$', _ListItemsEndpoint),
         *make_orderable_endpoints(r'/api/lists/([^/]+)/items', lambda id: app.lists[id].items),
@@ -101,6 +102,16 @@ class _ListsCreateExampleEndpoint(Endpoint):
         args = self.check_args({'use_case': str})
         lst = self.app.lists.create_example(**args)
         self.write(lst.json(restricted=True, include=True))
+
+class _ListsShortsEndpoint(Endpoint):
+    def post(self):
+        args = self.check_args({'list_id': str})
+        try:
+            args['lst'] = self.app.lists[args.pop('list_id')]
+        except KeyError as e:
+            raise error.ValueError('No list {}'.format(e))
+        short = self.app.lists.shorten(**args)
+        self.write({'short': short})
 
 class _ListEndpoint(Endpoint):
     def get(self, id):
