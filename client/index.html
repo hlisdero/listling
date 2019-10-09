@@ -422,6 +422,11 @@
                         >
                             <i class="fa fa-fw fa-arrow-circle-down"></i>
                         </button>
+                        <p class="micro-panel-main" data-content="switch shortUrl">
+                            <template>
+                                <strong>Join at <span data-content="shortUrl"></span></strong>
+                            </template>
+                        </p>
                         <button
                             is="micro-button" type="button"
                             class="listling-list-exit-presentation link"
@@ -495,10 +500,6 @@
             bottom: 0;
             box-shadow: 0 0 2px 1px rgba(0, 0, 0, 0.33);
             background: white;
-        }
-
-        .listling-list-exit-presentation {
-            margin-left: auto;
         }
 
         listling-list-page:not(.listling-list-mode-view) .listling-list-mode-view,

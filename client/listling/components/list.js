@@ -182,6 +182,11 @@ listling.components.list.Presentation = class {
         this.page._data.presentationMode = true;
         this._zoom();
         document.scrollingElement.classList.add("listling-list-scroll-snap");
+
+        const {short} = await micro.call(
+            "POST", "/api/lists/shorts", {list_id: this.page._data.lst.id}
+        );
+        this.page._data.shortUrl = `${location.origin}/l/${short.split(":")[1]}`;
     }
 
     /** Exit presentation mode. */
