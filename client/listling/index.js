@@ -345,8 +345,13 @@ listling.ListPage = class extends micro.Page {
                     })
                 );
 
-                if (location.hash === "#presentation") {
+                if (["#presentation", "#presentation+play"].includes(location.hash)) {
                     this._data.presentation.enter().catch(micro.util.catch);
+                }
+                if (["#play", "#presentation+play"].includes(location.hash)) {
+                    if (this._data.playlist) {
+                        this._data.playlistPlayPause();
+                    }
                 }
             }
         })().catch(micro.util.catch));
