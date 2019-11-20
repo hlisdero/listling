@@ -19,7 +19,7 @@ from time import time
 import micro
 from micro import (Activity, Application, Collection, Editable, Location, Object, Orderable,
                    Trashable, Settings, Event, WithContent, error)
-from micro.jsonredis import JSONRedis, RedisSortedSet
+from micro.jsonredis import JSONRedis, RedisList, RedisSortedSet
 from micro.util import randstr, run_instant, str_or_none, ON
 
 _USE_CASES = {
@@ -331,6 +331,10 @@ class List(Object, Editable):
     class Items(Collection, Orderable):
         """See :ref:`Items`."""
 
+        def __init__(self, lst, ids, *, app):
+            super().__init__(ids, app=app)
+            self.host = [lst]
+
         def create(self, title, text=None, *, resource=None, location=None, asynchronous=None):
             """See :http:post:`/api/lists/(id)/items`.
 
@@ -360,6 +364,7 @@ class List(Object, Editable):
                 location=location.json() if location else None, checked=False)
             self.app.r.oset(item.id, item)
             self.app.r.rpush(self.map_key, item.id)
+            self._update_item(item)
             self.host[0].activity.publish(
                 Event.create('list-create-item', self.host[0], {'item': item}, self.app))
             return item
@@ -369,6 +374,10 @@ class List(Object, Editable):
             self.host[0]._check_permission(self.app.user, 'list-modify')
             super().move(item, to)
 
+        def _update_item(self, item):
+            self.app.r.zadd('{}.items_sorted'.format(self.host[0].id),
+                            {item.id.encode(): -len(item.votes)})
+
     def __init__(self, *, id, app, authors, title, description, features, mode, activity):
         super().__init__(id=id, app=app)
         Editable.__init__(self, authors=authors, activity=activity)
@@ -376,9 +385,15 @@ class List(Object, Editable):
         self.description = description
         self.features = features
         self.mode = mode
-        self.items = List.Items((self, 'items'))
         self.activity = activity
         self.activity.host = self
+        self.sorted_by = None
+
+    @property
+    def items(self):
+        ids = (RedisSortedSet('{}.items_sorted'.format(self.id), self.app.r) if self.sorted_by
+               else RedisList('{}.items'.format(self.id), self.app.r))
+        return List.Items(self, ids, app=self.app)
 
     def do_edit(self, **attrs):
         self._check_permission(self.app.user, 'list-modify')
@@ -436,6 +451,7 @@ class Item(Object, Editable, Trashable, WithContent):
             if 'vote' not in self.item.list.features:
                 raise error.ValueError('Disabled item list features vote')
             if self.app.r.zadd(self.ids.key, {user.id.encode(): -time()}):
+                self.item.list.items._update_item(self.item)
                 self.item.list.activity.publish(
                     Event.create('item-votes-vote', self.item, app=self.app))
 
@@ -446,6 +462,7 @@ class Item(Object, Editable, Trashable, WithContent):
             if 'vote' not in self.item.list.features:
                 raise error.ValueError('Disabled item list features vote')
             if self.app.r.zrem(self.ids.key, user.id.encode()):
+                self.item.list.items._update_item(self.item)
                 self.item.list.activity.publish(
                     Event.create('item-votes-unvote', self.item, app=self.app))
 

@@ -212,3 +212,17 @@ class ItemVotesTest(ListlingTestCase):
         item.votes.unvote(user=self.user)
         self.assertEqual(list(item.votes.values()), [user])
         self.assertFalse(item.votes.has_user_voted(self.user))
+
+    def test_xxx(self):
+        user2 = self.app.login()
+        lst = self.app.lists.create('poll', v=2)
+        items = [
+            lst.items.create('A'),
+            lst.items.create('B'),
+            lst.items.create('C')
+        ]
+        lst.sorted_by = 'vote' # XXX
+        items[1].votes.vote(user=self.user)
+        items[1].votes.vote(user=user2)
+        items[2].votes.vote(user=self.user)
+        self.assertEqual(list(lst.items.values()), [items[1], items[2], items[0]])
