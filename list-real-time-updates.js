@@ -1,8 +1,8 @@
 
 // * TODO update edit list
 // * TODO update move item
+// * TODO update vote assign
 // * TODO what happens on update if list/item editor is open?
-// * Test playlist next on update/trash/move (see old commit 605c505)
 
 /* (workaround applied to ui_test
 ON +listling rtu ...
