@@ -37,7 +37,8 @@ listling.UI = class extends micro.UI {
             {url: "^/$", page: listling.components.start.StartPage.make},
             {url: "^/intro$", page: "listling-intro-page"},
             {url: "^/about$", page: makeAboutPage},
-            {url: "^/lists/([^/]+)(?:/[^/]+)?$", page: listling.ListPage.make}
+            {url: "^/lists/([^/]+)(?:/[^/]+)?$", page: listling.ListPage.make},
+            {url: "^/share$", page: "listling-share-page"}
         ]);
 
         Object.assign(this.renderEvent, {
