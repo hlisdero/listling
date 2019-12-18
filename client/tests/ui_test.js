@@ -1,6 +1,6 @@
 /*
  * Open Listling
- * Copyright (C) 2018 Open Listling contributors
+ * Copyright (C) 2019 Open Listling contributors
  *
  * This program is free software: you can redistribute it and/or modify it under the terms of the
  * GNU Affero General Public License as published by the Free Software Foundation, either version 3
@@ -15,7 +15,7 @@
  */
 
 /* eslint-env mocha, node */
-/* eslint-disable no-invalid-this, prefer-arrow-callback */
+/* eslint-disable no-invalid-this, no-unused-expressions, prefer-arrow-callback */
 
 "use strict";
 
@@ -25,7 +25,7 @@ let {promisify} = require("util");
 let {expect} = require("chai");
 let {until} = require("selenium-webdriver");
 
-const {getWithServiceWorker, startBrowser, untilElementTextLocated} =
+const {getWithServiceWorker, startBrowser, untilElementAttributeMatches, untilElementTextLocated} =
     require("@noyainrain/micro/test");
 
 const URL = "http://localhost:8081";
@@ -42,6 +42,13 @@ describe("UI", function() {
         await browser.findElement({css: ".listling-ui-intro"}).click();
         await browser.findElement({css: ".listling-intro-create-example button"}).click();
         await browser.wait(until.elementLocated({css: "listling-list-page"}));
+    }
+
+    async function readItemPlayPause(item) {
+        await item.findElement({css: ".listling-item-menu li:last-child"}).click();
+        const text = await item.findElement({css: ".listling-item-play-pause"}).getText();
+        await item.click();
+        return text.trim();
     }
 
     beforeEach(async function() {
@@ -100,11 +107,14 @@ describe("UI", function() {
         // Edit list
         await browser.findElement({css: ".listling-list-menu"}).click();
         await browser.findElement({css: ".listling-list-edit"}).click();
+        await browser.findElement({css: ".listling-list-settings button"}).click();
         form = await browser.findElement({css: "listling-list-page form"});
         input = await form.findElement({name: "title"});
         await input.clear();
         await input.sendKeys("Cat colony tasks");
         await form.findElement({name: "description"}).sendKeys("What has to be done!");
+        await form.findElement({css: "[name=features][value=vote]"}).click();
+        await form.findElement({css: "[name=features][value=play]"}).click();
         await form.findElement({css: "button:not([type])"}).click();
         await browser.wait(
             untilElementTextLocated({css: "listling-list-page h1"}, "Cat colony tasks"));
@@ -113,6 +123,7 @@ describe("UI", function() {
 
         // Create item
         await browser.findElement({css: ".listling-list-create-item button"}).click();
+        await browser.executeScript(() => scroll(0, document.scrollingElement.scrollHeight));
         form = await browser.findElement({css: ".listling-list-create-item form"});
         await form.findElement({name: "title"}).sendKeys("Sleep");
         await form.findElement({name: "text"}).sendKeys("Very important!");
@@ -146,16 +157,67 @@ describe("UI", function() {
                            timeout);
 
         // Uncheck item
-        const checkSelector = {css: ".listling-list-items > li:first-child .listling-item-check"};
-        const uncheckSelector = {
-            css: ".listling-list-items > li:first-child .listling-item-uncheck"
-        };
-        await browser.findElement(uncheckSelector).click();
-        let checkButton = await browser.wait(until.elementLocated(checkSelector), timeout);
+        const checkIcon = await browser.findElement({css: ".listling-item-check i"});
+        await checkIcon.click();
+        await browser.wait(
+            untilElementAttributeMatches(checkIcon, "className", /fa-square/u), timeout
+        );
 
         // Check item
-        await checkButton.click();
-        await browser.wait(until.elementLocated(uncheckSelector), timeout);
+        await checkIcon.click();
+        await browser.wait(
+            untilElementAttributeMatches(checkIcon, "className", /fa-check-square/u), timeout
+        );
+
+        // Assign to item
+        await browser.findElement({css: ".listling-item-menu"}).click();
+        await browser.findElement({css: ".listling-item-assign"}).click();
+        await browser.findElement({css: "[name=assignee] + micro-options li"}).click();
+        await browser.wait(
+            untilElementTextLocated({css: ".listling-assign-assignees p"}, "Guest"),
+            timeout
+        );
+
+        // Unassign from item
+        await browser.findElement({css: ".listling-assign-remove"}).click();
+        const ul = await browser.findElement({css: ".listling-assign-assignees"});
+        await browser.wait(until.elementTextIs(ul, ""), timeout);
+        await browser.findElement({css: ".listling-assign-close"}).click();
+        // Work around Edge not firing blur event when a button gets disabled
+        await browser.findElement({css: ".listling-item-menu"}).click();
+
+        // Vote for item
+        const voteButton = await browser.findElement({css: ".listling-item-vote"});
+        const votesP = await browser.findElement({css: ".listling-item-votes > p"});
+        await voteButton.click();
+        await browser.wait(until.elementTextIs(votesP, "1"), timeout);
+
+        // Unvote item
+        await voteButton.click();
+        await browser.wait(until.elementTextIs(votesP, "0"), timeout);
+
+        // View item details
+        await browser.findElement({css: "[is=listling-item]"}).click();
+        const footerVisible =
+            await browser.findElement({css: ".listling-item-footer"}).isDisplayed();
+        expect(footerVisible).to.be.true;
+
+        // Play list
+        await browser.findElement({css: ".listling-list-play-pause"}).click();
+        let item = await browser.findElement({css: "[is=listling-item]:nth-child(2)"});
+        let text = await readItemPlayPause(item);
+        expect(text).to.equal("Pause");
+
+        // Play next of list
+        await browser.findElement({css: ".listling-list-play-next"}).click();
+        item = await browser.findElement({css: "[is=listling-item]:nth-child(3)"});
+        text = await readItemPlayPause(item);
+        expect(text).to.equal("Pause");
+
+        // Pause list
+        await browser.findElement({css: ".listling-list-play-pause"}).click();
+        text = await readItemPlayPause(item);
+        expect(text).to.equal("Play");
 
         // View presentation mode
         await browser.executeScript(() => scroll(0, 0));

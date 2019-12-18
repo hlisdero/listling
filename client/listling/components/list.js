@@ -1,6 +1,6 @@
 /*
  * Open Listling
- * Copyright (C) 2018 Open Listling contributors
+ * Copyright (C) 2019 Open Listling contributors
  *
  * This program is free software: you can redistribute it and/or modify it under the terms of the
  * GNU Affero General Public License as published by the Free Software Foundation, either version 3
@@ -84,12 +84,130 @@ listling.components.list.ShareDialog = class extends HTMLElement {
 };
 document.registerElement("listling-share-dialog", listling.components.list.ShareDialog);
 
+/** Assign dialog. */
+listling.components.list.AssignDialog = class extends HTMLElement {
+    createdCallback() {
+        this.appendChild(
+            document.importNode(ui.querySelector(".listling-assign-dialog-template").content, true)
+        );
+        this._data = new micro.bind.Watchable({
+            itemElement: null,
+            userToText: user => user.name,
+
+            queryUsers: async query => {
+                const result = await ui.call(
+                    "GET",
+                    `/api/lists/${this._data.itemElement.list.id}/users?name=${encodeURIComponent(query)}`
+                );
+                let users = result.items;
+                if (ui.user.name.toLowerCase().includes(query.toLowerCase())) {
+                    users = [ui.user, ...users.filter(user => user.id !== ui.user.id)];
+                }
+                const assigneeIDs = new Set(
+                    this._data.itemElement.assignees.map(assignee => assignee.id)
+                );
+                return users.filter(user => !assigneeIDs.has(user.id));
+            },
+
+            add: async () => {
+                const assignee = this._input.valueAsObject;
+                try {
+                    await ui.call(
+                        "POST",
+                        `/api/lists/${this._data.itemElement.list.id}/items/${this._data.itemElement.item.id}/assignees`,
+                        {assignee_id: assignee.id}
+                    );
+                } catch (e) {
+                    if (
+                        e instanceof micro.APIError && e.error.__type__ === "ValueError" &&
+                        e.message.includes("assignees")
+                    ) {
+                        // Continue as usual to update the UI
+                    } else {
+                        throw e;
+                    }
+                }
+                ui.dispatchEvent(
+                    new CustomEvent(
+                        "item-assignees-assign",
+                        {detail: {item: this._data.itemElement.item, assignee}}
+                    )
+                );
+                this._input.value = "";
+                this._input.valueAsObject = null;
+                this.querySelector("micro-options").activate();
+            },
+
+            remove: async assignee => {
+                try {
+                    await ui.call(
+                        "DELETE",
+                        `/api/lists/${this._data.itemElement.list.id}/items/${this._data.itemElement.item.id}/assignees/${assignee.id}`
+                    );
+                } catch (e) {
+                    if (e instanceof micro.APIError && e.error.__type__ === "NotFoundError") {
+                        // Continue as usual to update the UI
+                    } else {
+                        throw e;
+                    }
+                }
+                ui.dispatchEvent(
+                    new CustomEvent(
+                        "item-assignees-unassign",
+                        {detail: {item: this._data.itemElement.item, assignee}}
+                    )
+                );
+            },
+
+            close: () => this.remove(),
+
+            onChange: () => {
+                if (this._input.valueAsObject) {
+                    this._input.setCustomValidity("");
+                } else {
+                    this._input.setCustomValidity(
+                        "The user is unknown. Share the list with others to assign them here."
+                    );
+                }
+            },
+
+            onSelect: () => {
+                this._input.dispatchEvent(new Event("change", {bubbles: true}));
+                this.querySelector(".listling-assign-add").click();
+            }
+        });
+        micro.bind.bind(this.children, this._data);
+
+        this._input = this.querySelector("input");
+        this.querySelector("div").shortcutContext.add("A", () => this._input.focus());
+    }
+
+    attachedCallback() {
+        ui.classList.add("listling-ui-dialog");
+        setTimeout(() => this._input.focus(), 0);
+    }
+
+    detachedCallback() {
+        ui.classList.remove("listling-ui-dialog");
+    }
+
+    get itemElement() {
+        return this._data.itemElement;
+    }
+
+    set itemElement(value) {
+        this._data.itemElement = value;
+    }
+};
+document.registerElement("listling-assign-dialog", listling.components.list.AssignDialog);
+
 /** Presentation controller. */
 listling.components.list.Presentation = class {
     constructor(page) {
         this.page = page;
         this._em = null;
         this._maxWidth = null;
+        this._onScrollTimeout = null;
     }
 
     /** Enter presentation mode. */
@@ -141,12 +259,11 @@ listling.components.list.Presentation = class {
         };
         ui.addEventListener("focusout", this._onFocusOut);
 
-        let timeout;
         this._onScroll = () => {
-            if (timeout) {
-                clearTimeout(timeout);
+            if (this._onScrollTimeout) {
+                clearTimeout(this._onScrollTimeout);
             }
-            timeout = setTimeout(() => {
+            this._onScrollTimeout = setTimeout(() => {
                 const em = parseFloat(getComputedStyle(this.page).fontSize);
                 // Use scrollingElement to work around Safari scrolling via body instead of root
                 // (see https://bugs.webkit.org/show_bug.cgi?id=5991)
@@ -206,6 +323,7 @@ listling.components.list.Presentation = class {
         ui.removeEventListener("focusin", this._onFocusIn);
         ui.removeEventListener("focusout", this._onFocusOut);
         removeEventListener("scroll", this._onScroll);
+        clearTimeout(this._onScrollTimeout);
 
         if ("orientation" in screen) {
             await screen.orientation.unlock();
@@ -214,6 +332,8 @@ listling.components.list.Presentation = class {
         if (document.fullscreenElement) {
             await document.exitFullscreen();
         }
+
+        this.page._data.shortUrl = null;
     }
 
     onFooterMouseDown(event) {
@@ -253,7 +373,259 @@ listling.components.list.Presentation = class {
         const elem = micro.keyboard.findAncestor(
             document.activeElement, e => e instanceof listling.ItemElement
         ) || this.page.querySelector(".listling-list-title");
-        const em = parseFloat(getComputedStyle(this.page).fontSize);
-        scroll(0, elem.offsetTop - (2 * 1.5 * em + 2 * 1.5 * em / 4));
+        ui.scrollToElement(elem);
     }
 };
+
+/** Playlist controller. */
+listling.components.list.Playlist = class {
+    constructor(page) {
+        this.page = page;
+        // eslint-disable-next-line no-underscore-dangle
+        this._data = this.page._data;
+        this._itemsOL = this.page.querySelector(".listling-list-items");
+        this._current = this._itemsOL.firstElementChild;
+
+        Object.assign(this._data, {
+            playlistPlaying: false,
+
+            playlistPlayPause: () => {
+                // Wait until button does not touch icon anymore
+                setTimeout(() => {
+                    if (!this._current) {
+                        return;
+                    }
+                    if (this._current.playable.paused) {
+                        this._current.playable.play();
+                    } else {
+                        this._current.playable.pause();
+                    }
+                }, 0);
+            },
+
+            playlistPlayNext: () => {
+                if (!this._current) {
+                    return;
+                }
+                const item = this._current.nextElementSibling || this._itemsOL.firstElementChild;
+                item.playable.play();
+            },
+
+            playlistPlayPrevious: () => {
+                if (!this._current) {
+                    return;
+                }
+                const item = this._current.previousElementSibling || this._itemsOL.lastElementChild;
+                item.playable.play();
+            }
+        });
+
+        this._onPlay = event => {
+            if (event.target !== this._current) {
+                this._current.playable.pause();
+                this._current.playable.time = 0;
+                this._current = event.target;
+            }
+            this._current.focus();
+            ui.scrollToElement(this._current);
+            this._data.playlistPlaying = true;
+        };
+        this._itemsOL.addEventListener("play", this._onPlay);
+
+        this._onPause = event => {
+            this._data.playlistPlaying = false;
+            if (event.detail.ended) {
+                this._data.playlistPlayNext();
+            }
+        };
+        this._itemsOL.addEventListener("pause", this._onPause);
+
+        this._observer = new MutationObserver(records => {
+            // Handle empty list
+            if (!this._current && this._itemsOL.hasChildNodes()) {
+                this._current = this._itemsOL.firstElementChild;
+            } else if (this._current && !this._itemsOL.hasChildNodes()) {
+                this._current = null;
+                this._data.playlistPlaying = false;
+            }
+            if (!this._current) {
+                return;
+            }
+
+            // Handle trashed and moved items, which are removed from the DOM
+            for (let record of records) {
+                for (let node of record.removedNodes) {
+                    if (node === this._current) {
+                        this._current = record.nextSibling || this._itemsOL.firstElementChild;
+                        if (this._data.playlistPlaying) {
+                            this._current.playable.play();
+                        }
+                    }
+                }
+            }
+        });
+        this._observer.observe(this._itemsOL, {childList: true});
+    }
+
+    dispose() {
+        this._itemsOL.removeEventListener("play", this._onPlay);
+        this._itemsOL.removeEventListener("pause", this._onPause);
+        this._observer.disconnect();
+    }
+};
+
+/** Playable :class:`listling.ItemElement` extension. */
+listling.components.list.Playable = class {
+    constructor(elem) {
+        this.elem = elem;
+        // eslint-disable-next-line no-underscore-dangle
+        this._data = this.elem._data;
+        this._playableResource = false;
+        this._resourceElement = null;
+        this._clockTimeout = null;
+        this._clockStartTime = null;
+        this._clockTime = 0;
+        this._frame = null;
+
+        Object.assign(this._data, {
+            playablePlaying: false,
+
+            playablePlayPause: () => {
+                if (this.paused) {
+                    this.play();
+                } else {
+                    this.pause();
+                }
+            }
+        });
+
+        this._onPlay = () => {
+            const render = () => {
+                this._renderProgress();
+                this._frame = requestAnimationFrame(render);
+            };
+            render();
+            this._data.playablePlaying = true;
+            this.elem.dispatchEvent(new CustomEvent("play", {bubbles: true}));
+        };
+
+        this._onPause = event => {
+            cancelAnimationFrame(this._frame);
+            this._frame = null;
+            this._data.playablePlaying = false;
+            this.elem.dispatchEvent(
+                new CustomEvent("pause", {detail: {ended: event.detail.ended}, bubbles: true})
+            );
+        };
+
+        this.elem.shortcutContext.add("P", () => {
+            if (!this._data.item.trashed) {
+                this._data.playablePlayPause();
+            }
+        });
+    }
+
+    dispose() {
+        this.resourceElement = null;
+        this.elem.shortcutContext.remove("P");
+    }
+
+    /** Web :ref:`Resource` element. */
+    get resourceElement() {
+        return this._resourceElement;
+    }
+
+    set resourceElement(value) {
+        if (this._playableResource) {
+            this._resourceElement.removeEventListener("play", this._onPlay);
+            this._resourceElement.removeEventListener("pause", this._onPause);
+            this._playableResource = false;
+            if (this._data.playablePlaying) {
+                this._onPause(new CustomEvent("pause", {detail: {ended: true}}));
+            }
+        } else {
+            this._resetClock();
+        }
+
+        this._resourceElement = value;
+        this._playableResource = this._resourceElement && "play" in this._resourceElement;
+
+        if (this._playableResource) {
+            this._resourceElement.addEventListener("play", this._onPlay);
+            this._resourceElement.addEventListener("pause", this._onPause);
+        }
+        this._renderProgress();
+    }
+
+    get duration() {
+        return this._playableResource
+            ? this._resourceElement.duration : listling.components.list.Playable.STATIC_DURATION;
+    }
+
+    get time() {
+        if (this._playableResource) {
+            return this._resourceElement.time;
+        }
+        return this._clockTimeout
+            ? Math.min((new Date() - this._clockStartTime) / 1000 + this._clockTime, this.duration)
+            : this._clockTime;
+    }
+
+    set time(value) {
+        if (this._playableResource) {
+            this._resourceElement.time = value;
+        } else {
+            this._clockTime = value;
+        }
+        this._renderProgress();
+    }
+
+    get paused() {
+        return this._playableResource ? this._resourceElement.paused : !this._clockTimeout;
+    }
+
+    play() {
+        if (this._playableResource) {
+            this._resourceElement.play();
+        } else {
+            this._startClock();
+        }
+    }
+
+    pause() {
+        if (this._playableResource) {
+            this._resourceElement.pause();
+        } else {
+            this._resetClock(this.time);
+        }
+    }
+
+    _startClock() {
+        if (!this._clockTimeout) {
+            this._clockStartTime = new Date();
+            this._clockTimeout = setTimeout(
+                () => this._resetClock(), (this.duration - this._clockTime) * 1000
+            );
+            this._onPlay();
+        }
+    }
+
+    _resetClock(time = null) {
+        this._clockTime = time || 0;
+        if (this._clockTimeout) {
+            clearTimeout(this._clockTimeout);
+            this._clockTimeout = null;
+            this._clockStartTime = null;
+            this._onPause(new CustomEvent("pause", {detail: {ended: time === null}}));
+        }
+    }
+
+    _renderProgress() {
+        const progress = this.duration ? this.time / this.duration : 0;
+        this.elem.firstElementChild.style.setProperty(
+            "--listling-item-progress", `${progress * 100}%`
+        );
+    }
+};
+
+listling.components.list.Playable.STATIC_DURATION = 20;
