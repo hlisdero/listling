@@ -8,9 +8,9 @@ You can give it a try on [Listling](https://listling.org/).
 
 The following software is required and must be set up on your system:
 
-* Python >= 3.5
-* Node.js >= 8.0
-* Redis >= 2.8
+* Python >= 3.7
+* Node.js >= 10.15
+* Redis >= 5.0
 
 Open Listling should work on any [POSIX](https://en.wikipedia.org/wiki/POSIX) system.
 
@@ -47,5 +47,6 @@ Join the chat at [listling on Gitter](https://gitter.im/listling/community).
 
 * Sven James &lt;sven.jms AT gmail.com>
 * Rainer Müller &lt;raimue AT codingfarm.de>
+* Daniel Danner &lt;daniel AT danner.de>
 
 Copyright (C) 2019 Open Listling contributors
